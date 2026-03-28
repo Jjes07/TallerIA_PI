@@ -1,0 +1,139 @@
+{% extends 'base.html' %} 
+{% block content %}
+
+<div class="container mt-4">
+    <h1>Recomendador de Películas</h1>
+    <p class="text-muted">
+        <small>Puedes escribir el <strong>título de una película</strong> que te guste para obtener recomendaciones similares, 
+        o <strong>describe la película</strong> que estás buscando.</small>
+    </p>
+    
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="prompt" class="form-label">¿Qué película quieres encontrar o te gustó?</label>
+            <input type="text" name="prompt" class="form-control" value="{{ search_term }}" 
+                   placeholder="Ej: 'Inception' o 'Una película de ciencia ficción con viajes en el tiempo'" 
+                   required>
+        </div>
+        <button type="submit" class="btn btn-primary">Buscar recomendaciones</button>
+    </form>
+
+    {% if search_term %}
+        {% if matched_by_title and not best_movie %}
+            <div class="alert alert-info mt-4" role="alert">
+                <h5>Se encontraron películas con títulos similares a "{{ search_term }}":</h5>
+                <p>Hemos encontrado coincidencias parciales. Aquí están las películas que coinciden con tu búsqueda:</p>
+                <ul>
+                {% for rec in recommendations %}
+                    <li><strong>{{ rec.movie.title }}</strong> ({{ rec.movie.year|default:"Año desconocido" }})</li>
+                {% endfor %}
+                </ul>
+                <p class="mt-2">¿Quieres probar con un título más específico o una descripción?</p>
+            </div>
+        {% elif best_movie %}
+            <div class="alert alert-success mt-4" role="alert">
+                <h4 class="alert-heading">
+                    {% if matched_by_title %}
+                        🎬 Recomendaciones basadas en "{{ search_term }}"
+                    {% else %}
+                        🎬 Mejor coincidencia para tu búsqueda
+                    {% endif %}
+                </h4>
+                <p>Encontramos la siguiente película que coincide con tus intereses:</p>
+            </div>
+            
+            <div class="card mt-2 mb-4">
+                <div class="row g-0">
+                    <div class="col-md-4">
+                        <img src="{{ best_movie.image.url }}" class="img-fluid rounded-start" alt="{{ best_movie.title }}">
+                    </div>
+                    <div class="col-md-8">
+                        <div class="card-body">
+                            <h5 class="card-title">{{ best_movie.title }}</h5>
+                            <p class="card-text">{{ best_movie.description }}</p>
+                            <p class="card-text">
+                                <small class="text-muted">
+                                    Género: {{ best_movie.genre|default:"No especificado" }}<br>
+                                    Año: {{ best_movie.year|default:"No especificado" }}
+                                </small>
+                            </p>
+                            <p class="card-text">
+                                <small class="text-muted">Nivel de coincidencia: {{ similarity|floatformat:3 }}</small>
+                            </p>
+                            {% if best_movie.url %}
+                                <a href="{{ best_movie.url }}" class="btn btn-primary" target="_blank">Ver más información</a>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            {% if recommendations|length > 1 %}
+                <h4 class="mt-4">Más recomendaciones para ti</h4>
+                <div class="row row-cols-1 row-cols-md-3 g-4 mt-2">
+                    {% for rec in recommendations|slice:"1:" %}
+                        <div class="col">
+                            <div class="card h-100">
+                                <img src="{{ rec.movie.image.url }}" class="card-img-top" alt="{{ rec.movie.title }}" style="height: 200px; object-fit: cover;">
+                                <div class="card-body">
+                                    <h5 class="card-title">{{ rec.movie.title }}</h5>
+                                    <p class="card-text">{{ rec.movie.description|truncatechars:100 }}</p>
+                                    <p class="card-text">
+                                        <small class="text-muted">
+                                            Año: {{ rec.movie.year|default:"N/A" }}
+                                            {% if rec.based_on %}
+                                                <br>Basado en: {{ rec.based_on }}
+                                            {% endif %}
+                                        </small>
+                                    </p>
+                                    <p class="card-text">
+                                        <small class="text-muted">Coincidencia: {{ rec.similarity|floatformat:3 }}</small>
+                                    </p>
+                                    {% if rec.movie.url %}
+                                        <a href="{{ rec.movie.url }}" class="btn btn-sm btn-outline-primary" target="_blank">Ver más</a>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="alert alert-warning mt-4" role="alert">
+                <h5>No se encontraron resultados para "{{ search_term }}"</h5>
+                <p>Algunas sugerencias:</p>
+                <ul>
+                    <li>Prueba con el título exacto de una película (ej: "The Matrix")</li>
+                    <li>Describe el género o tema que te interesa (ej: "película de terror psicológico")</li>
+                    <li>Menciona elementos específicos (ej: "película con viajes espaciales y drama familiar")</li>
+                </ul>
+            </div>
+        {% endif %}
+    {% endif %}
+    
+    {% if not search_term %}
+        <div class="alert alert-secondary mt-4" role="alert">
+            <h5>¿Cómo funciona?</h5>
+            <p><strong>Si escribes el título de una película:</strong> Buscaremos películas similares basadas en las descripciones de las películas que ya tenemos en nuestra base de datos.</p>
+            <p><strong>Si escribes una descripción:</strong> Analizaremos tu descripción y encontraremos las películas que mejor coincidan con lo que estás buscando.</p>
+            <p class="mb-0">¡Pruébalo ahora! Escribe algo en el cuadro de búsqueda de arriba.</p>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+    .card-img-top {
+        height: 200px;
+        object-fit: cover;
+    }
+    .card {
+        transition: transform 0.2s;
+    }
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+</style>
+
+{% endblock content %}

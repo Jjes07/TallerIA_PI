@@ -25,6 +25,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', movieViews.home, name='home'),
     path('about/', movieViews.about, name='about'),
+    path('recommendations/', movieViews.recommend_movie, name='recommendations'),
     path('news/', include('news.urls')),
     path('statistics/', movieViews.statistics_view, name='statistics'),
     path('signup/', movieViews.signup, name='signup'),

@@ -8,6 +8,11 @@ import matplotlib
 import io
 import urllib, base64
 
+from openai import OpenAI
+import numpy as np
+import os
+from dotenv import load_dotenv
+
 def home(request):
     #return HttpResponse('<h1>Welcome to Home Page</h1>')
     #return render(request, 'home.html')
@@ -23,6 +28,10 @@ def home(request):
 def about(request):
     #return HttpResponse('<h1>Welcome to About Page</h1>')
     return render(request, 'about.html')
+
+def recommendations(request):
+    #return HttpResponse('<h1>Welcome to Recommendations Page</h1>')
+    return render(request, 'recommendations.html')
 
 def signup(request):
     email = request.GET.get('email') 
@@ -123,3 +132,141 @@ def generate_bar_chart(data, xlabel, ylabel):
     buffer.close()
     graphic = base64.b64encode(image_png).decode('utf-8')
     return graphic
+
+# Cargar la API Key
+load_dotenv('../openAI.env')
+client = OpenAI(api_key=os.environ.get('openai_apikey'))
+
+# Función para calcular similitud de coseno
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+# views.py - Versión mejorada de recommend_movie
+
+def recommend_movie(request):
+    """Vista que maneja recomendaciones por título existente o descripción libre"""
+    best_movie = None
+    max_similarity = -1
+    search_term = ''
+    matched_by_title = False
+    recommendations = []  # Para almacenar múltiples recomendaciones
+
+    if request.method == 'POST':
+        # Recibir el prompt del usuario
+        search_term = request.POST.get('prompt', '').strip()
+        
+        if search_term:
+            # PRIMERO: Verificar si el prompt coincide con algún título exacto o parcial
+            # Intentamos encontrar coincidencia exacta primero
+            exact_match = Movie.objects.filter(title__iexact=search_term).first()
+            
+            if exact_match:
+                # Si hay coincidencia exacta con el título, usamos el embedding de esa película
+                matched_by_title = True
+                if exact_match.emb:
+                    prompt_emb = np.frombuffer(exact_match.emb, dtype=np.float32)
+                    
+                    # Recorrer todas las películas excepto la que estamos usando como referencia
+                    for movie in Movie.objects.exclude(id=exact_match.id):
+                        if movie.emb:
+                            movie_emb = np.frombuffer(movie.emb, dtype=np.float32)
+                            similarity = cosine_similarity(prompt_emb, movie_emb)
+                            recommendations.append({
+                                'movie': movie,
+                                'similarity': similarity
+                            })
+                    
+                    # Ordenar recomendaciones por similitud (mayor a menor)
+                    recommendations.sort(key=lambda x: x['similarity'], reverse=True)
+                    
+                    # Tomar las 5 mejores recomendaciones
+                    recommendations = recommendations[:5]
+                    
+                    # Si hay al menos una recomendación, la mejor es la primera
+                    if recommendations:
+                        best_movie = recommendations[0]['movie']
+                        max_similarity = recommendations[0]['similarity']
+            else:
+                # Si no hay coincidencia con título, buscar coincidencia parcial
+                title_matches = Movie.objects.filter(title__icontains=search_term)
+                
+                if title_matches.exists():
+                    # Si hay múltiples coincidencias parciales, mostrar todas como opciones
+                    matched_by_title = True
+                    title_movies = list(title_matches)
+                    
+                    # Para cada coincidencia, generar recomendaciones basadas en su embedding
+                    for title_match in title_movies:
+                        if title_match.emb:
+                            prompt_emb = np.frombuffer(title_match.emb, dtype=np.float32)
+                            
+                            for movie in Movie.objects.exclude(id=title_match.id):
+                                if movie.emb:
+                                    movie_emb = np.frombuffer(movie.emb, dtype=np.float32)
+                                    similarity = cosine_similarity(prompt_emb, movie_emb)
+                                    recommendations.append({
+                                        'movie': movie,
+                                        'similarity': similarity,
+                                        'based_on': title_match.title
+                                    })
+                    
+                    # Eliminar duplicados (si una misma película aparece por diferentes títulos)
+                    unique_recommendations = {}
+                    for rec in recommendations:
+                        movie_id = rec['movie'].id
+                        if movie_id not in unique_recommendations or rec['similarity'] > unique_recommendations[movie_id]['similarity']:
+                            unique_recommendations[movie_id] = rec
+                    
+                    recommendations = list(unique_recommendations.values())
+                    recommendations.sort(key=lambda x: x['similarity'], reverse=True)
+                    recommendations = recommendations[:5]
+                    
+                    if recommendations:
+                        best_movie = recommendations[0]['movie']
+                        max_similarity = recommendations[0]['similarity']
+                
+                else:
+                    # No hay coincidencia con título, procesar como descripción libre
+                    matched_by_title = False
+                    
+                    # Generar embedding del prompt del usuario
+                    try:
+                        response = client.embeddings.create(
+                            input=[search_term],
+                            model="text-embedding-3-small"
+                        )
+                        prompt_emb = np.array(response.data[0].embedding, dtype=np.float32)
+                        
+                        # Recorrer la base de datos y comparar con todas las películas
+                        for movie in Movie.objects.all():
+                            if movie.emb:
+                                movie_emb = np.frombuffer(movie.emb, dtype=np.float32)
+                                similarity = cosine_similarity(prompt_emb, movie_emb)
+                                recommendations.append({
+                                    'movie': movie,
+                                    'similarity': similarity
+                                })
+                        
+                        # Ordenar recomendaciones por similitud
+                        recommendations.sort(key=lambda x: x['similarity'], reverse=True)
+                        
+                        # Tomar las 5 mejores recomendaciones
+                        recommendations = recommendations[:5]
+                        
+                        if recommendations:
+                            best_movie = recommendations[0]['movie']
+                            max_similarity = recommendations[0]['similarity']
+                    
+                    except Exception as e:
+                        print(f"Error al generar embedding: {e}")
+                        # Manejar error en caso de que falle la API
+                        pass
+
+    return render(request, 'recommendations.html', {
+        'best_movie': best_movie,
+        'similarity': max_similarity,
+        'search_term': search_term,
+        'matched_by_title': matched_by_title,
+        'recommendations': recommendations,
+        'has_recommendations': len(recommendations) > 0
+    })
